@@ -1,0 +1,122 @@
+library(haven)
+silc_r <- read_sav("R:/3. Projekti/2019 SILC analiza/Baze za rad/silc_r.sav")
+View(silc_r)
+
+#Deal with missing data
+
+install.packages("Amelia")
+library(Amelia)
+#ukupan broj ispitanika u bazi SILC_2017
+
+nrow(silc_r)
+
+#changing ? into missing value
+
+silc_r[silc_r == '?'] <- NA
+
+missmap(silc_r)
+missmap(silc_r,y.at=c(1),y.labels = c(''),col=c('yellow','black'))
+
+
+#konačan broj ispitanika u bazi kada se izbace svi ispitanici sa nedostajućim vrednostima
+silc_r <- na.omit(silc_r)
+nrow(silc_r)
+
+#logit model
+library(nnet)
+head(silc_r)
+mymodel <- multinom(LONG_POV~., data = silc_r)
+p <- predict(mymodel, silc_r)
+head(p)
+tab <- table(p, silc_r$LONG_POV)
+tab
+#accuracy rate
+acc <- sum(diag(tab))/sum(tab)
+acc
+#mislasification rate
+mfc <- 1-acc
+mfc
+
+#Model performance evaluation
+library(ROCR)
+
+#predviđamo verovatnoću za svakog ispitanika
+pred <- predict(mymodel, silc_r, type = 'prob')
+head(pred)
+
+#na osnovu cut-off tačke (najčešće 0.5) gledamo da li je predikcija tačna ili ne
+#na osnovu funkcije tačnosti u zavisnosti od različitih cut-off tačaka gledamo koji cutoff da izaberemo
+pred <- prediction (pred, silc_r$LONG_POV)
+pred
+
+eval <- performance(pred, "acc")
+library(ggplot2)
+plot(eval)
+abline(h=0.85, v=0.4)
+
+#Računanje true positive rate
+tpr <- performance (pred, "tpr")
+plot(tpr)
+abline(a=0, b=1)
+
+#crtanje roc curve
+roc <- performance(pred, "tpr", "fpr")
+
+plot(roc, colorize = TRUE)
+
+#Auc - area under curve
+
+auc <- performance(pred, "auc")
+auc <- unlist(slot(auc, "y.values"))
+auc
+
+#creating training and test subset
+
+install.packages("caTools")
+library(caTools)
+set.seed(101)
+
+split = sample.split(silc_r$LONG_POV, SplitRatio = 0.70)
+
+final.train = subset(silc_r, split == TRUE)
+final.test = subset(silc_r, split == FALSE)
+
+summary(final.train)
+summary(final.test)
+
+#logit model with all predictor
+
+logit <- glm(formula = LONG_POV ~ ., family = binomial(logit), data = silc_r)
+summary(logit)
+
+#stepwise model koji ubacije prediktor po prediktor i računa AIC za svakog od njih. AIC = 2k - 2ln(L), gde 
+#je L maksimalna vrednost funkcije maksimalne verodostojnosti a k broj prediktora. Što manji AIC
+#to model bolje i optimalnije, sa manjim brojem prediktora predviđa željeni ishod
+logit1 <- step(logit)
+summary(logit1)
+
+#eksponenciranje svakog regresionog koeficijenta, odnosno zaključivanje koliko se promeni količnik šanse
+#ishoda kada se promeni prediktor za jednu jedinicu a svi ostali se drže konstantnim KŠ=Š(x+1)/Š(x)
+#za kategoričke prediktore ovo znači direktnu promenu šanse za svaku kategoriju prediktora
+#verovatnoća = proporcija entiteta u jednoj kategoriji
+#šansa = p/(1-5); za p=0,5 šansa je 1
+#količnih šansi Š1/Š2; ako je količnik šanse za prediktor (exp(b)=2) to znači da ako se prediktor poveća
+#za 1 šanse da kriterijum promeni vrednost rastu dva puta
+
+#pravljenje količnika šansi (OR, odds ratio) (exp (b))
+exp(cbind(OR = coef(logit), confint(logit)))
+
+#pravljenje confusion matrice
+
+test.predicted.income = predict(logit, newdata = final.test, type = "response" )
+table(final.test$LONG_POV, test.predicted.income > 0.5)
+
+#accuracy rate - tacnost modela, koliko model uopste tacno pogadja (1-(lazno negativni + lazno pozitivni))
+(1360+279)/(1360+107+300+279)
+
+
+#koliko model uspesno prepoznaje dugorocno siromasne (true positive/true positive + false positive) - precision
+279/(279+107)
+
+#koliko model uspesno prepoznaje one koji nisu dugorocno siromasni (true negative/true negative + false negative) - recall
+1360/(1360+107)
